@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "messplatz"
+version = "0.1.0"
+description = "Messplatz tooling"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Tim Schneider" }]
+dependencies = ["numpy", "pyvisa", "pyvisa-py", "pyusb"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+ble = ["bleak"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
