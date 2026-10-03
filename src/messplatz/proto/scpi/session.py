@@ -1,6 +1,7 @@
 """
 SCPI session: executes commands over a transport.
 """
+import time
 from typing import Any, Optional, Protocol, Type
 
 from messplatz.com.base import Transport
@@ -87,6 +88,21 @@ class SCPISession:
             data += self.transport.read()
             size = SCPIBlock.expected_size(data)
         return data
+
+    def wait_complete(self, timeout: float = 5.0, interval: float = 0.02) -> None:
+        """
+        Poll *OPC? until the device reports the last command as executed.
+
+        Some devices (e.g. UNI-T) answer *OPC? immediately with 0 while still
+        busy instead of blocking until completion, so the query is repeated.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            if self.query("*OPC?").strip() == "1":
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Device did not complete the last command within {timeout} s")
+            time.sleep(interval)
 
     def error(self) -> Optional[SCPIError]:
         """

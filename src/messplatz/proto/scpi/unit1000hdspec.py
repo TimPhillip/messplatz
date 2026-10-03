@@ -35,6 +35,25 @@ class _Unit1000HD_ChannelSpec(SCPINode):
         return self.__channel_number
 
 
+class _Unit1000HD_TriggerSpec(SCPINode):
+
+    class Status(enum.Enum):
+        STOP = "STOP"
+        ARMED = "ARMED"
+        READY = "READY"
+        TRIGGERED = "TRIGED"
+        AUTO = "AUTO"
+        SCAN = "SCAN"
+        RESET = "RESET"
+        REPLAY = "REPLAY"
+        WAIT = "WAIT"
+
+    def __init__(self, scope: str = "TRIG", parent: SCPINode = None):
+        super().__init__(scope=scope, parent=parent)
+
+        self.status = SCPIEnumNode(self.Status, scope="STAT", parent=self)
+
+
 class _Unit1000HD_WaveformSpec(SCPINode):
 
     class Formats(enum.Enum):
@@ -76,6 +95,7 @@ class Unit1000HDSCPISpec(SCPINode):
         self.autoset = SCPINode(scope="AUTO", parent=self, callable=True)
 
         self.system = _Unit1000HD_SystemSpec(scope="SYST", parent=self)
+        self.trigger = _Unit1000HD_TriggerSpec(scope="TRIG", parent=self)
         self.waveform = _Unit1000HD_WaveformSpec(scope="WAV", parent=self)
 
 
