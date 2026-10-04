@@ -59,6 +59,27 @@ class UPO1000HDChannel:
 
     @property
     @measurement
+    def offset(self) -> float:
+        """
+        Vertical offset in V (:CHANnel<n>:OFFSet?): the voltage shown at the
+        screen center is ``-offset``, i.e. a positive offset moves the trace up.
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).offset.query())
+
+    @offset.setter
+    @control
+    def offset(self, value: float) -> None:
+        """
+        Set the vertical offset in V. The range depends on the scale
+        (datasheet: +-2 V up to 50 mV/div, +-25 V up to 1 V/div, +-250 V
+        above, at 1X probe); the scope clips, read the property back to get
+        the value actually applied.
+        """
+        self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).offset(SCPIFloat.format(value)))
+        self.osci.session.wait_complete()
+
+    @property
+    @measurement
     def label(self) -> str:
         """
         Channel label text (:CHANnel<n>:LABel?).
@@ -144,6 +165,26 @@ class UPO1000HDTimebase:
         # rounds to the current value is handled by the settle time in wait_to_fill_storage()
         self.previous_seconds_per_division = None if math.isclose(current, value, rel_tol=1e-6) else current
         self.osci.session.execute(self.osci.unit_scpi.timebase.scale(SCPIFloat.format(value)))
+        self.osci.session.wait_complete()
+
+    @property
+    @measurement
+    def offset(self) -> float:
+        """
+        Horizontal offset in s (:TIMebase:OFFSet?): time of the screen center
+        relative to the trigger point. Positive values show the signal after the trigger.
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.timebase.offset.query())
+
+    @offset.setter
+    @control
+    def offset(self, value: float) -> None:
+        """
+        Set the horizontal offset in s. Datasheet range: pre-trigger (negative)
+        at least one screen width, post-trigger (positive) up to 4 ks; the
+        scope clips, read the property back to get the value actually applied.
+        """
+        self.osci.session.execute(self.osci.unit_scpi.timebase.offset(SCPIFloat.format(value)))
         self.osci.session.wait_complete()
 
     @property
@@ -270,7 +311,8 @@ class UPO1000HD(Osci):
            to have been rounded to the current scale and the screen is valid
            as it is,
         2. the waveform increment matches it: points * XINC == divisions * scale,
-        3. the origin matches: XOR == -(points * XINC) / 2 (trigger at center),
+        3. the origin matches: XOR == offset - (points * XINC) / 2, i.e. the
+           trigger point sits at the screen center shifted by :TIMebase:OFFSet,
         4. the screen buffer holds no fill values (``FILL_VALUE``).
 
         Raises TimeoutError if that does not happen in time.
@@ -295,15 +337,19 @@ class UPO1000HD(Osci):
 
         while True:
             scale = self.timebase.seconds_per_division
+            offset = self.timebase.offset
             points = self.session.execute(waveform.points.query())
             x_increment = self.session.execute(waveform.x_increment.query())
             x_origin = self.session.execute(waveform.x_origin.query())
             span = points * x_increment
+            expected_origin = offset - span / 2
 
             settled = time.monotonic() - started >= settle_time
             preamble_ok = ((previous is None or not close(scale, previous) or settled)
                            and close(span, divisions * scale)
-                           and close(x_origin, -span / 2))
+                           # absolute tolerance relative to the span: the expected origin
+                           # itself can be zero (offset of half a screen)
+                           and abs(x_origin - expected_origin) <= 0.01 * span)
             if preamble_ok:
                 raw_data = self.session.execute(waveform.data.query())
                 adc = np.frombuffer(raw_data, dtype="<u2")
@@ -313,7 +359,7 @@ class UPO1000HD(Osci):
                 state = f"{int(np.count_nonzero(adc != self.FILL_VALUE))}/{len(adc)} points valid"
             else:
                 state = (f"scale {scale:g} s/div (before change {previous}), span {span:g} s, "
-                         f"origin {x_origin:g} s")
+                         f"origin {x_origin:g} s (expected {expected_origin:g} s for offset {offset:g} s)")
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Screen buffer did not refill within {timeout} s ({state})")
@@ -392,9 +438,11 @@ class UPO1000HD(Osci):
         x_origin = self.session.execute(self.unit_scpi.waveform.x_origin.query())
         x_reference = self.session.execute(self.unit_scpi.waveform.x_reference.query())
 
-        # convert to volts and seconds, see :WAVeform:DATA? in the programming manual
-        # TODO: verify y_origin handling with a non-zero channel offset
-        voltage = ((adc - y_reference) * y_increment + y_origin).astype(np.float32)
+        # convert to volts and seconds. The programming manual's formula adds YORigin in volts,
+        # but the scope reports it in ADC counts (YORigin = offset / YINCrement, e.g. -1500 for
+        # -3 V at 2 mV/count), so it has to be subtracted from the ADC value before scaling.
+        # Verified on a UPO1084HD with the probe compensation signal at -3 V offset.
+        voltage = ((adc - y_reference - y_origin) * y_increment).astype(np.float32)
         time = ((np.arange(len(adc)) - x_reference) * x_increment + x_origin).astype(np.float32)
 
         return time, voltage

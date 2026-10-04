@@ -31,6 +31,8 @@ class _Unit1000HD_ChannelSpec(SCPINode):
         self.display = SCPIOnOff(scope="DISP", parent=self)
         # :CHANnel<n>:SCALe <volts/div> | UP | DOWN, query returns volts/div as a float
         self.scale = SCPINode(scope="SCAL", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
+        # :CHANnel<n>:OFFSet <volts>, vertical position of the trace, query returns a float
+        self.offset = SCPINode(scope="OFFS", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
         # :CHANnel<n>:LABel "<text>" (ASCII letters, digits, some punctuation), :LABel:ENABle shows it on screen
         self.label = SCPINode(scope="LAB", parent=self, queryable=True, callable=True, response_type=SCPIString)
         self.label.enable = SCPIOnOff(scope="ENAB", parent=self.label)
@@ -66,6 +68,8 @@ class _Unit1000HD_TimebaseSpec(SCPINode):
 
         # :TIMebase:SCALe <s/div> | UP | DOWN, query returns s/div as a float
         self.scale = SCPINode(scope="SCAL", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
+        # :TIMebase:OFFSet <seconds>, horizontal position of the trigger point, query returns a float
+        self.offset = SCPINode(scope="OFFS", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
 
 
 class _Unit1000HD_WaveformSpec(SCPINode):
