@@ -31,6 +31,27 @@ class UPO1000HDChannel:
         self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).display(value))
         self.osci.session.wait_complete()
 
+    @property
+    @measurement
+    def volts_per_division(self) -> float:
+        """
+        Vertical scale in V/div (:CHANnel<n>:SCALe?), including the probe attenuation.
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).scale.query())
+
+    @volts_per_division.setter
+    @control
+    def volts_per_division(self, value: float) -> None:
+        """
+        Set the vertical scale in V/div.
+
+        With fine tuning (:CHANnel<n>:VERNier) off the scope only accepts the
+        1-2-5 sequence, 500 uV/div to 10 V/div at 1X probe attenuation; read
+        the property back to get the value actually applied.
+        """
+        self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).scale(SCPIFloat.format(value)))
+        self.osci.session.wait_complete()
+
 
 class UPO1000HDTrigger:
 
@@ -181,6 +202,7 @@ class UPO1000HD(Osci):
     # horizontal divisions of a screen read; the scope has no query for it, see
     # UPO1000HDTimebase.num_divisions for the measured value (8 on the UPO1000HD)
     HORIZONTAL_DIVISIONS = 8
+    VERTICAL_DIVISIONS = 8
 
     @control
     def wait_to_fill_storage(self, timeout: float = 5.0, interval: float = 0.05,

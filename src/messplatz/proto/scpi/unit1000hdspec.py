@@ -29,6 +29,8 @@ class _Unit1000HD_ChannelSpec(SCPINode):
         self.__channel_number = channel_number
 
         self.display = SCPIOnOff(scope="DISP", parent=self)
+        # :CHANnel<n>:SCALe <volts/div> | UP | DOWN, query returns volts/div as a float
+        self.scale = SCPINode(scope="SCAL", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
 
     @property
     def channel_number(self) -> int:
