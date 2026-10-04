@@ -4,17 +4,22 @@ from messplatz.devices.core.osci import Osci
 from messplatz.proto.scpi.core import SCPICoreSpec
 from messplatz.proto.scpi.unit1000hdspec import Unit1000HDSCPISpec, _Unit1000HD_TriggerSpec
 from messplatz.proto.scpi.session import SCPISession
-from messplatz.proto.scpi.types import SCPIFloat
+from messplatz.proto.scpi.types import SCPIFloat, SCPIString
 
 from functools import cached_property
 import math
 import time
+import warnings
 from typing import Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
 
 class UPO1000HDChannel:
+
+    # longest label the scope keeps; longer strings are cut off by the device
+    # (observed on the UPO1084HD, not documented in the programming manual)
+    MAX_LABEL_LENGTH = 16
 
     def __init__(self, channel_number: int, osci: Osci):
         self.channel_number = channel_number
@@ -50,6 +55,47 @@ class UPO1000HDChannel:
         the property back to get the value actually applied.
         """
         self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).scale(SCPIFloat.format(value)))
+        self.osci.session.wait_complete()
+
+    @property
+    @measurement
+    def label(self) -> str:
+        """
+        Channel label text (:CHANnel<n>:LABel?).
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).label.query())
+
+    @label.setter
+    @control
+    def label(self, text: str) -> None:
+        """
+        Set the channel label text. ASCII letters, digits and some punctuation
+        only; the label is shown on screen when :attr:`label_visible` is True.
+        Text longer than ``MAX_LABEL_LENGTH`` is trimmed with a warning;
+        non-ASCII or control characters raise ValueError.
+        """
+        if not text.isascii() or not text.isprintable():
+            bad = sorted({c for c in text if not (c.isascii() and c.isprintable())})
+            raise ValueError(f"Channel label {text!r} contains characters the scope cannot display: {bad!r}")
+        if len(text) > self.MAX_LABEL_LENGTH:
+            warnings.warn(f"Channel {self.channel_number} label {text!r} exceeds {self.MAX_LABEL_LENGTH} "
+                          f"characters, trimmed to {text[:self.MAX_LABEL_LENGTH]!r}", stacklevel=3)
+            text = text[:self.MAX_LABEL_LENGTH]
+        self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).label(SCPIString.format(text)))
+        self.osci.session.wait_complete()
+
+    @property
+    @measurement
+    def label_visible(self) -> bool:
+        """
+        Whether the channel label is shown on screen (:CHANnel<n>:LABel:ENABle?).
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).label.enable.query())
+
+    @label_visible.setter
+    @control
+    def label_visible(self, value: bool) -> None:
+        self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).label.enable(value))
         self.osci.session.wait_complete()
 
 

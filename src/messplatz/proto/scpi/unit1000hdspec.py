@@ -1,7 +1,7 @@
 import enum
 
 from messplatz.proto.scpi.core import SCPINode, SCPIOnOff, SCPIEnumNode, SCPISourceNode
-from messplatz.proto.scpi.types import SCPIBlock, SCPIFloat, SCPIInt
+from messplatz.proto.scpi.types import SCPIBlock, SCPIFloat, SCPIInt, SCPIString
 
 
 class _Unit1000HD_TouchSpec(SCPINode):
@@ -31,6 +31,9 @@ class _Unit1000HD_ChannelSpec(SCPINode):
         self.display = SCPIOnOff(scope="DISP", parent=self)
         # :CHANnel<n>:SCALe <volts/div> | UP | DOWN, query returns volts/div as a float
         self.scale = SCPINode(scope="SCAL", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
+        # :CHANnel<n>:LABel "<text>" (ASCII letters, digits, some punctuation), :LABel:ENABle shows it on screen
+        self.label = SCPINode(scope="LAB", parent=self, queryable=True, callable=True, response_type=SCPIString)
+        self.label.enable = SCPIOnOff(scope="ENAB", parent=self.label)
 
     @property
     def channel_number(self) -> int:
