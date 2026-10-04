@@ -4,10 +4,12 @@ from messplatz.devices.core.osci import Osci
 from messplatz.proto.scpi.core import SCPICoreSpec
 from messplatz.proto.scpi.unit1000hdspec import Unit1000HDSCPISpec, _Unit1000HD_TriggerSpec
 from messplatz.proto.scpi.session import SCPISession
+from messplatz.proto.scpi.types import SCPIFloat
 
 from functools import cached_property
+import math
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
@@ -46,7 +48,74 @@ class UPO1000HDTrigger:
 
 class UPO1000HDTimebase:
 
-    pass
+    def __init__(self, osci: Osci):
+        self.osci = osci
+        # scale reported by the scope right before the last change (None if unknown);
+        # wait_to_fill_storage() uses it to tell the old screen from the new one
+        self.previous_seconds_per_division: Optional[float] = None
+
+    @property
+    @measurement
+    def seconds_per_division(self) -> float:
+        """
+        Main time base scale in s/div (:TIMebase:SCALe?).
+        """
+        return self.osci.session.execute(self.osci.unit_scpi.timebase.scale.query())
+
+    @seconds_per_division.setter
+    @control
+    def seconds_per_division(self, value: float) -> None:
+        """
+        Set the main time base scale in s/div.
+
+        With fine tuning (:TIMebase:VERNier) off the scope only accepts the
+        1-2-5 sequence (2 ns/div or 5 ns/div up to 1 ks/div depending on the
+        model); read the property back to get the value actually applied.
+        """
+        current = self.seconds_per_division
+        # an exact no-op request leaves nothing to wait for; a request that the scope
+        # rounds to the current value is handled by the settle time in wait_to_fill_storage()
+        self.previous_seconds_per_division = None if math.isclose(current, value, rel_tol=1e-6) else current
+        self.osci.session.execute(self.osci.unit_scpi.timebase.scale(SCPIFloat.format(value)))
+        self.osci.session.wait_complete()
+
+    @property
+    @measurement
+    def num_divisions(self) -> int:
+        """
+        Number of horizontal divisions on screen as currently reported by the
+        scope (8 on the UPO1000HD, see ``UPO1000HD.HORIZONTAL_DIVISIONS``).
+
+        The scope has no query for this, so it is derived from a screen read:
+        points on screen (:WAVeform:POINts?) times the time per point
+        (:WAVeform:XINCrement?) divided by the time base scale. Only valid in
+        a settled state; right after a time base change the increment and the
+        scale belong to different settings and the result is wrong.
+        """
+        waveform = self.osci.unit_scpi.waveform
+        self.osci.session.execute(waveform.mode(waveform.Modes.NORMAL))
+        points = self.osci.session.execute(waveform.points.query())
+        x_increment = self.osci.session.execute(waveform.x_increment.query())
+        scale = self.osci.session.execute(self.osci.unit_scpi.timebase.scale.query())
+        return round(points * x_increment / scale)
+
+    @control
+    def step_up(self) -> None:
+        """
+        Increase the main time base by one step (:TIMebase:SCALe UP).
+        """
+        self.previous_seconds_per_division = self.seconds_per_division
+        self.osci.session.execute(self.osci.unit_scpi.timebase.scale("UP"))
+        self.osci.session.wait_complete()
+
+    @control
+    def step_down(self) -> None:
+        """
+        Decrease the main time base by one step (:TIMebase:SCALe DOWN).
+        """
+        self.previous_seconds_per_division = self.seconds_per_division
+        self.osci.session.execute(self.osci.unit_scpi.timebase.scale("DOWN"))
+        self.osci.session.wait_complete()
 
 
 class UPO1000HD(Osci):
@@ -69,6 +138,7 @@ class UPO1000HD(Osci):
 
         # TODO: infere the number of channels from the device, for now we assume 4 channels
         self.channels = [UPO1000HDChannel(i, self) for i in range(1, 5)]
+        self.timebase = UPO1000HDTimebase(self)
 
     def close(self) -> None:
         if self.transport.is_open:
@@ -103,6 +173,82 @@ class UPO1000HD(Osci):
                 raise TimeoutError(
                     f"Scope did not acquire within {timeout} s (trigger status {current.name}): "
                     "no trigger event, check the trigger level or use AUTO sweep mode")
+            time.sleep(interval)
+
+    # WORD format fill value while the screen buffer has not been (re)filled yet
+    FILL_VALUE = 0xFFFF
+
+    # horizontal divisions of a screen read; the scope has no query for it, see
+    # UPO1000HDTimebase.num_divisions for the measured value (8 on the UPO1000HD)
+    HORIZONTAL_DIVISIONS = 8
+
+    @control
+    def wait_to_fill_storage(self, timeout: float = 5.0, interval: float = 0.05,
+                             settle_time: float = 1.0) -> None:
+        """
+        Wait until the screen buffer is valid for the current time base.
+
+        After a time base change the trigger status still shows the previous
+        acquisition, *OPC? reports completion and for a short while the scope
+        even serves the complete previous screen (old XINC, no fill values),
+        so none of these alone can detect the refill. This method first sleeps
+        for one screen time (divisions * s/div, the minimum a refill needs) and
+        then polls until all of the following hold:
+
+        1. the time base scale reported by the scope differs from the one read
+           before the change (the requested value is rounded to the 1-2-5
+           sequence by the scope, so it cannot serve as reference). If the
+           scale is still unchanged after ``settle_time`` the request is taken
+           to have been rounded to the current scale and the screen is valid
+           as it is,
+        2. the waveform increment matches it: points * XINC == divisions * scale,
+        3. the origin matches: XOR == -(points * XINC) / 2 (trigger at center),
+        4. the screen buffer holds no fill values (``FILL_VALUE``).
+
+        Raises TimeoutError if that does not happen in time.
+        """
+        waveform = self.unit_scpi.waveform
+        self.session.execute(waveform.mode(waveform.Modes.NORMAL))
+        self.session.execute(waveform.format(waveform.Formats.WORD))
+        self.session.wait_complete()
+
+        started = time.monotonic()
+        deadline = started + timeout
+        # not timebase.num_divisions: that is derived from XINC and the scale, which are
+        # inconsistent with each other during the transient this method waits for
+        divisions = self.HORIZONTAL_DIVISIONS
+        previous = self.timebase.previous_seconds_per_division
+
+        # the refill cannot be done before one screen worth of samples has been acquired
+        time.sleep(divisions * self.timebase.seconds_per_division)
+
+        def close(a: float, b: float, rel: float = 0.01) -> bool:
+            return abs(a - b) <= rel * max(abs(a), abs(b))
+
+        while True:
+            scale = self.timebase.seconds_per_division
+            points = self.session.execute(waveform.points.query())
+            x_increment = self.session.execute(waveform.x_increment.query())
+            x_origin = self.session.execute(waveform.x_origin.query())
+            span = points * x_increment
+
+            settled = time.monotonic() - started >= settle_time
+            preamble_ok = ((previous is None or not close(scale, previous) or settled)
+                           and close(span, divisions * scale)
+                           and close(x_origin, -span / 2))
+            if preamble_ok:
+                raw_data = self.session.execute(waveform.data.query())
+                adc = np.frombuffer(raw_data, dtype="<u2")
+                if len(adc) and not np.any(adc == self.FILL_VALUE):
+                    self.timebase.previous_seconds_per_division = None
+                    return
+                state = f"{int(np.count_nonzero(adc != self.FILL_VALUE))}/{len(adc)} points valid"
+            else:
+                state = (f"scale {scale:g} s/div (before change {previous}), span {span:g} s, "
+                         f"origin {x_origin:g} s")
+
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Screen buffer did not refill within {timeout} s ({state})")
             time.sleep(interval)
 
     @control
@@ -165,7 +311,7 @@ class UPO1000HD(Osci):
         adc = np.frombuffer(raw_data, dtype="<u2")
 
         # the buffer is filled with 0xFFFF while the scope has not acquired yet
-        if np.all(adc == 0xFFFF):
+        if np.all(adc == self.FILL_VALUE):
             raise RuntimeError("No waveform data acquired yet (buffer holds only fill values)")
         adc = adc.astype(np.float32)
 

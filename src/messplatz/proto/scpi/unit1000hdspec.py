@@ -1,7 +1,7 @@
 import enum
 
 from messplatz.proto.scpi.core import SCPINode, SCPIOnOff, SCPIEnumNode, SCPISourceNode
-from messplatz.proto.scpi.types import SCPIBlock, SCPIFloat
+from messplatz.proto.scpi.types import SCPIBlock, SCPIFloat, SCPIInt
 
 
 class _Unit1000HD_TouchSpec(SCPINode):
@@ -54,6 +54,15 @@ class _Unit1000HD_TriggerSpec(SCPINode):
         self.status = SCPIEnumNode(self.Status, scope="STAT", parent=self)
 
 
+class _Unit1000HD_TimebaseSpec(SCPINode):
+
+    def __init__(self, scope: str = "TIM", parent: SCPINode = None):
+        super().__init__(scope=scope, parent=parent)
+
+        # :TIMebase:SCALe <s/div> | UP | DOWN, query returns s/div as a float
+        self.scale = SCPINode(scope="SCAL", parent=self, queryable=True, callable=True, response_type=SCPIFloat)
+
+
 class _Unit1000HD_WaveformSpec(SCPINode):
 
     class Formats(enum.Enum):
@@ -72,6 +81,8 @@ class _Unit1000HD_WaveformSpec(SCPINode):
         self.mode = SCPIEnumNode(self.Modes, scope="MODE", parent=self)
         self.format = SCPIEnumNode(self.Formats, scope="FORMAT", parent=self)
         self.data = SCPINode(scope="DATA", parent=self, queryable=True, response_type=SCPIBlock)
+        # number of points of a read, in NORMAL mode defaults to the points shown on screen
+        self.points = SCPINode(scope="POIN", parent=self, queryable=True, callable=True, response_type=SCPIInt)
 
         # scaling parameters, see :WAVeform:XINCrement? ... :WAVeform:YREFerence?
         self.x_increment = SCPINode(scope="XINC", parent=self, queryable=True, response_type=SCPIFloat)
@@ -96,6 +107,7 @@ class Unit1000HDSCPISpec(SCPINode):
 
         self.system = _Unit1000HD_SystemSpec(scope="SYST", parent=self)
         self.trigger = _Unit1000HD_TriggerSpec(scope="TRIG", parent=self)
+        self.timebase = _Unit1000HD_TimebaseSpec(scope="TIM", parent=self)
         self.waveform = _Unit1000HD_WaveformSpec(scope="WAV", parent=self)
 
 
