@@ -148,21 +148,30 @@ class FnirsiSession:
         self.transport = transport
         self.handshake_delay = handshake_delay
         self._seq = len(HANDSHAKE)
+        self._started = False
 
     def start(self) -> None:
-        """Replay the app handshake so the meter starts streaming."""
+        """Connect and replay the app handshake so the meter starts streaming."""
+        self.transport.ensure_open()
         # the meter needs a pause between the handshake writes (as the app does)
         for cmd in HANDSHAKE:
             self.transport.write(cmd)
             time.sleep(self.handshake_delay)
         self._seq = len(HANDSHAKE)
+        self._started = True
+
+    def _ensure_started(self) -> None:
+        if not self._started:
+            self.start()
 
     def set_mode(self, function: int, range_setting: int = Range.AUTO) -> None:
+        self._ensure_started()
         self._seq += 1
         self.transport.write(set_mode_command(function, range_setting, self._seq))
 
     def read_frames(self) -> List[bytes]:
         """Frames of the next notification."""
+        self._ensure_started()
         return list(iter_frames(self.transport.read()))
 
     def read_measurement(self, max_notifications: int = 50) -> Measurement:

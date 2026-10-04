@@ -23,6 +23,16 @@ class Transport(ABC):
         """Read one complete message."""
         ...
 
+    @property
+    @abstractmethod
+    def is_open(self) -> bool:
+        ...
+
+    def ensure_open(self) -> None:
+        """Open lazily on first use, so devices can be created without hardware."""
+        if not self.is_open:
+            self.open()
+
     def __enter__(self):
         self.open()
         return self

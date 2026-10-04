@@ -21,6 +21,10 @@ class Ethernet(Transport):
         self._sock = socket.create_connection((self.host, self.port), self.timeout)
         self._buf = b""
 
+    @property
+    def is_open(self) -> bool:
+        return self._sock is not None
+
     def close(self) -> None:
         if self._sock:
             self._sock.close()

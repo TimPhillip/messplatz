@@ -64,9 +64,11 @@ class SCPISession:
         return result
 
     def write(self, text: str) -> None:
+        self.transport.ensure_open()
         self.transport.write((text + self.terminator).encode(self.encoding))
 
     def read(self) -> str:
+        self.transport.ensure_open()
         return self.transport.read().decode(self.encoding).rstrip("\r\n")
 
     def query(self, text: str) -> str:
@@ -77,6 +79,7 @@ class SCPISession:
         """
         Read a complete binary block, possibly spread over several reads.
         """
+        self.transport.ensure_open()
         data = self.transport.read()
         size = SCPIBlock.expected_size(data)
         if data[1:2] == b"0":

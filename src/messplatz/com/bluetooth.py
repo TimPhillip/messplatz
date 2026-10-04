@@ -41,6 +41,10 @@ class Ble(Transport):
             self._stop_loop()
             raise
 
+    @property
+    def is_open(self) -> bool:
+        return self._client is not None
+
     def close(self) -> None:
         if self._client is not None:
             try:

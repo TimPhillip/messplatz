@@ -16,6 +16,10 @@ class UsbTmc(Transport):
     def open(self) -> None:
         self._fd = os.open(self.path, os.O_RDWR)
 
+    @property
+    def is_open(self) -> bool:
+        return self._fd is not None
+
     def close(self) -> None:
         if self._fd is not None:
             os.close(self._fd)

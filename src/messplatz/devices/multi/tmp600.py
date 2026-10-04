@@ -1,5 +1,6 @@
 from typing import Optional
 
+from messplatz.cache import control, measurement
 from messplatz.com.bluetooth import Ble
 from messplatz.devices.core.multi import Multi
 from messplatz.proto.fnirsi import FnirsiSession, Function, Measurement, Range
@@ -19,12 +20,12 @@ class TMP600(Multi):
     def __init__(self, address: Optional[str] = None):
         self.transport = Ble(name=None if address else self.NAME, address=address,
                              notify_uuid=self.NOTIFY_UUID, write_uuid=self.WRITE_UUID)
-        self.transport.open()
+        # connects and sends the handshake on first use
         self.session = FnirsiSession(self.transport)
-        self.session.start()
 
     def close(self) -> None:
-        self.transport.close()
+        if self.transport.is_open:
+            self.transport.close()
 
     def __enter__(self):
         return self
@@ -36,9 +37,11 @@ class TMP600(Multi):
     def info(self) -> str:
         return f"FNIRSI {self.NAME}"
 
+    @control
     def set_mode(self, function: Function, range_setting: int = Range.AUTO) -> None:
         self.session.set_mode(function, range_setting)
 
+    @measurement
     def read(self) -> Measurement:
         """Current reading: drops buffered old readings and waits for a fresh one."""
         self.transport.flush()

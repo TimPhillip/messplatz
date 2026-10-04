@@ -30,6 +30,10 @@ class Visa(Transport):
         self._inst = rm.open_resource(self.resource)
         self._inst.timeout = self.timeout_ms
 
+    @property
+    def is_open(self) -> bool:
+        return self._inst is not None
+
     def close(self) -> None:
         if self._inst is not None:
             self._inst.close()

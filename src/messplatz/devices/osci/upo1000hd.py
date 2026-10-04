@@ -1,3 +1,4 @@
+from messplatz.cache import control, measurement
 from messplatz.com.visa import Visa
 from messplatz.devices.core.osci import Osci
 from messplatz.proto.scpi.core import SCPICoreSpec
@@ -18,13 +19,34 @@ class UPO1000HDChannel:
         self.osci = osci
 
     @property
+    @measurement
     def display(self) -> bool:
         return self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).display.query())
 
     @display.setter
+    @control
     def display(self, value: bool) -> None:
         self.osci.session.execute(self.osci.unit_scpi.channel(self.channel_number).display(value))
         self.osci.session.wait_complete()
+
+
+class UPO1000HDTrigger:
+
+    class Status:
+        RESET = "RESET"
+        ARMED = "ARMED"
+        TRIGGERED = "TRIGGERED"
+        AUTO = "AUTO"
+
+    @property
+    @measurement
+    def status(self) -> "Status":
+        return self.osci.session.execute(self.osci.unit_scpi.trigger.status.query())
+
+
+class UPO1000HDTimebase:
+
+    pass
 
 
 class UPO1000HD(Osci):
@@ -38,8 +60,7 @@ class UPO1000HD(Osci):
     def __init__(self):
 
         # TODO: make the transport configurable (USB, Ethernet, ...)
-        self.transport = Visa(self.RESOURCE)
-        self.transport.open()
+        self.transport = Visa(self.RESOURCE)   # opened on first command
         self.session = SCPISession(self.transport)
 
         # use the SCPI core specification for this device (TODO: replace later with UniT)
@@ -50,14 +71,17 @@ class UPO1000HD(Osci):
         self.channels = [UPO1000HDChannel(i, self) for i in range(1, 5)]
 
     def close(self) -> None:
-        self.transport.close()
+        if self.transport.is_open:
+            self.transport.close()
 
     @cached_property
+    @measurement
     def info(self) -> str:
         return self.session.execute(self.scpi.identification.query())
 
 
     @property
+    @measurement
     def trigger_status(self) -> _Unit1000HD_TriggerSpec.Status:
         return self.session.execute(self.unit_scpi.trigger.status.query())
 
@@ -81,33 +105,41 @@ class UPO1000HD(Osci):
                     "no trigger event, check the trigger level or use AUTO sweep mode")
             time.sleep(interval)
 
+    @control
     def run(self) -> None:
         self.session.execute(self.unit_scpi.run())
 
+    @control
     def stop(self) -> None:
         self.session.execute(self.unit_scpi.stop())
         self.session.wait_complete()
 
+    @control
     def autoset(self) -> None:
         self.session.execute(self.unit_scpi.autoset())
 
+    @control
     def lock(self, locked: bool) -> None:
         self.session.execute(self.unit_scpi.system.lock(locked))
         self.session.wait_complete()
 
+    @control
     def lock_touch(self, locked: bool) -> None:
         self.session.execute(self.unit_scpi.system.touch.lock(locked))
         self.session.wait_complete()
 
     @property
+    @measurement
     def is_locked(self) -> bool:
         return self.session.execute(self.unit_scpi.system.lock.query())
 
     @property
+    @measurement
     def is_touch_locked(self) -> bool:
         return self.session.execute(self.unit_scpi.system.touch.lock.query())
 
 
+    @measurement
     def get_waveform(self, channel: int, timeout: float = 5.0) -> Tuple[NDArray[np.float32], NDArray[np.float32]]:
         """
         Read the waveform shown on screen; returns (time in s, voltage in V).
